@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Voxel Game – Infinite World</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<style>
+body { margin:0; overflow:hidden; background:black; font-family:sans-serif; }
+
+#hint {
+  position: fixed;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,0.5);
+  color: white;
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+
+#inventory {
+  position: fixed;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  max-width: 95vw;
+}
+
+.slot {
+  min-width: 44px;
+  height: 44px;
+  border: 2px solid white;
+  border-radius: 6px;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  color: white;
+}
+
+.selected { border-color: yellow; }
+</style>
+</head>
+
+<body>
+<div id="hint">Drag = look & move | Tap = break | Hold = place</div>
+<div id="inventory"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.158/build/three.min.js"></script>
+
+<script>
+// ===== SCENE =====
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+
+const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
+camera.position.set(0, 2, 6);
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+sun.position.set(10,20,10);
+scene.add(sun);
+
+// ===== MATERIALS =====
+const geo = new THREE.BoxGeometry(1,1,1);
+
+const BLOCKS = {
+  grass: { color:0x3cb043, icon:"🟩" },
+  dirt: { color:0x8b5a2b, icon:"🟫" },
+  stone: { color:0x888888, icon:"⬜" },
+  sand: { color:0xead9a8, icon:"🟨" },
+  wood: { color:0x9b6a3c, icon:"🪵" },
+  leaves: { color:0x2e8b57, icon:"🍃" },
+  planks: { color:0xc19a6b, icon:"🟤" },
+  cobble: { color:0x777777, icon:"🧱" },
+  bricks: { color:0xb22222, icon:"🟥" },
+  glass: { color:0x99ccff, icon:"🪟", opacity:0.4 },
+  water: { color:0x1e90ff, icon:"💧", opacity:0.5 },
+  lava: { color:0xff4500, icon:"🔥" }
+};
+
+const materials = {};
+for(const k in BLOCKS){
+  materials[k] = new THREE.MeshStandardMaterial({
+    color: BLOCKS[k].color,
+    transparent: BLOCKS[k].opacity ? true : false,
+    opacity: BLOCKS[k].opacity || 1
+  });
+}
+
+// ===== INVENTORY =====
+let currentBlock = "grass";
+const inventory = document.getElementById("inventory");
+
+Object.keys(BLOCKS).forEach((type,i)=>{
+  const slot = document.createElement("div");
+  slot.className = "slot" + (i===0?" selected":"");
+  slot.textContent = BLOCKS[type].icon;
+  slot.onclick = ()=>{
+    document.querySelectorAll(".slot").forEach(s=>s.classList.remove("selected"));
+    slot.classList.add("selected");
+    currentBlock = type;
+  };
+  inventory.appendChild(slot);
+});
+
+// ===== WORLD DATA =====
+const blocks = [];
+const blockMap = new Map();
+
+function key(x,y,z){ return `${x},${y},${z}`; }
+
+function addBlock(x,y,z,type){
+  const k = key(x,y,z);
+  if(blockMap.has(k)) return;
+
+  const b = new THREE.Mesh(geo, materials[type]);
+  b.position.set(x,y,z);
+  b.userData = {x,y,z,type};
+  scene.add(b);
+
+  blocks.push(b);
+  blockMap.set(k,b);
+}
+
+function removeBlock(b){
+  scene.remove(b);
+  blockMap.delete(key(b.userData.x,b.userData.y,b.userData.z));
+  blocks.splice(blocks.indexOf(b),1);
+}
+
+// ===== INFINITE CHUNKS =====
+const CHUNK = 16;
+const DIST = 2;
+const generated = new Set();
+
+function ckey(x,z){ return `${x},${z}`; }
+
+function generateChunk(cx,cz){
+  const k = ckey(cx,cz);
+  if(generated.has(k)) return;
+  generated.add(k);
+
+  for(let x=0;x<CHUNK;x++){
+    for(let z=0;z<CHUNK;z++){
+      addBlock(cx*CHUNK+x,0,cz*CHUNK+z,"grass");
+      addBlock(cx*CHUNK+x,-1,cz*CHUNK+z,"stone");
+    }
+  }
+}
+
+function updateChunks(){
+  const cx = Math.floor(camera.position.x / CHUNK);
+  const cz = Math.floor(camera.position.z / CHUNK);
+
+  for(let x=-DIST;x<=DIST;x++){
+    for(let z=-DIST;z<=DIST;z++){
+      generateChunk(cx+x,cz+z);
+    }
+  }
+}
+
+// ===== INTERACTION =====
+const raycaster = new THREE.Raycaster();
+const touch = new THREE.Vector2();
+let start = 0;
+
+window.addEventListener("touchstart",()=>start=Date.now());
+window.addEventListener("touchend",e=>{
+  const t = e.changedTouches[0];
+  const hold = Date.now()-start;
+
+  touch.x = (t.clientX/innerWidth)*2-1;
+  touch.y = -(t.clientY/innerHeight)*2+1;
+
+  raycaster.setFromCamera(touch,camera);
+  const hit = raycaster.intersectObjects(blocks);
+
+  if(hit.length){
+    if(hold<300) removeBlock(hit[0].object);
+    else{
+      const p = hit[0].point.clone().add(hit[0].face.normal);
+      addBlock(Math.round(p.x),Math.round(p.y),Math.round(p.z),currentBlock);
+    }
+  }
+});
+
+// ===== MOVEMENT =====
+let yaw=0,pitch=0,move=0;
+
+window.addEventListener("touchmove",e=>{
+  const t=e.changedTouches[0];
+  yaw-=t.movementX*0.002||0;
+  pitch-=t.movementY*0.002||0;
+  pitch=Math.max(-1.5,Math.min(1.5,pitch));
+  move=-0.12;
+});
+
+window.addEventListener("touchend",()=>move=0);
+
+// ===== LOOP =====
+function animate(){
+  requestAnimationFrame(animate);
+  camera.rotation.order="YXZ";
+  camera.rotation.y=yaw;
+  camera.rotation.x=pitch;
+  camera.translateZ(move);
+  updateChunks();
+  renderer.render(scene,camera);
+}
+animate();
+
+window.addEventListener("resize",()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>
