@@ -204,25 +204,4 @@ window.addEventListener("touchmove",e=>{
   move=-0.12;
 });
 
-window.addEventListener("touchend",()=>move=0);
-
-// ===== LOOP =====
-function animate(){
-  requestAnimationFrame(animate);
-  camera.rotation.order="YXZ";
-  camera.rotation.y=yaw;
-  camera.rotation.x=pitch;
-  camera.translateZ(move);
-  updateChunks();
-  renderer.render(scene,camera);
-}
-animate();
-
-window.addEventListener("resize",()=>{
-  camera.aspect=innerWidth/innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth,innerHeight);
-});
-</script>
-</body>
-</html>
+window.addEventListener("touchend",()=>
